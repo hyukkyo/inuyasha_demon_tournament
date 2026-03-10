@@ -1,0 +1,130 @@
+:root {
+  font-family: "Pretendard Variable", "Noto Sans KR", sans-serif;
+  color: #f6efe2;
+  background:
+    radial-gradient(circle at top, rgba(164, 52, 32, 0.32), transparent 38%),
+    linear-gradient(180deg, #19100f 0%, #0f0a0a 100%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+button {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.85rem 1.2rem;
+  font: inherit;
+  font-weight: 700;
+  color: #1a0f0d;
+  background: #f6b25f;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+button.ghost {
+  color: #f6efe2;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+}
+
+.panel {
+  width: min(720px, 100%);
+  padding: 2rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 24px;
+  background: rgba(19, 14, 14, 0.82);
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.3);
+}
+
+.eyebrow {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #f6b25f;
+}
+
+h1,
+h2,
+p,
+dd,
+dt {
+  margin-top: 0;
+}
+
+.summary {
+  max-width: 56ch;
+  color: rgba(246, 239, 226, 0.82);
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+.status-grid div {
+  padding: 1rem;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.status-grid dt {
+  font-size: 0.8rem;
+  color: rgba(246, 239, 226, 0.6);
+}
+
+.status-grid dd {
+  margin-bottom: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.snapshot-box {
+  padding: 1rem;
+  border-radius: 18px;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.snapshot-box pre {
+  margin: 0;
+  overflow: auto;
+  color: #f6efe2;
+}
+
+@media (max-width: 640px) {
+  .panel {
+    padding: 1.25rem;
+  }
+
+  .status-grid {
+    grid-template-columns: 1fr;
+  }
+}
