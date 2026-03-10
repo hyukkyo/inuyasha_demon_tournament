@@ -38,6 +38,18 @@ button.ghost {
   border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .app-shell {
   min-height: 100vh;
   display: grid;
@@ -107,10 +119,100 @@ dt {
   margin-bottom: 1.5rem;
 }
 
+.room-join-field input {
+  width: 130px;
+  height: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 0.85rem 1rem;
+  font: inherit;
+  color: #f6efe2;
+  background: rgba(255, 255, 255, 0.08);
+  text-transform: uppercase;
+}
+
+.room-box,
+.error-box,
 .snapshot-box {
   padding: 1rem;
   border-radius: 18px;
   background: rgba(0, 0, 0, 0.22);
+  margin-top: 1rem;
+}
+
+.error-box {
+  border: 1px solid rgba(255, 122, 89, 0.35);
+  background: rgba(135, 32, 21, 0.16);
+}
+
+.error-box p {
+  margin-bottom: 0;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 0;
+}
+
+.detail-grid div {
+  padding: 0.85rem;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.detail-grid dt {
+  font-size: 0.8rem;
+  color: rgba(246, 239, 226, 0.6);
+}
+
+.detail-grid dd {
+  margin-bottom: 0;
+  word-break: break-all;
+}
+
+.empty-state {
+  margin-bottom: 0;
+  color: rgba(246, 239, 226, 0.65);
+}
+
+.phase-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  color: rgba(246, 239, 226, 0.78);
+}
+
+.character-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.character-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #f6efe2;
+}
+
+.character-card.is-active {
+  background: linear-gradient(180deg, rgba(246, 178, 95, 0.28), rgba(255, 255, 255, 0.08));
+  outline: 1px solid rgba(246, 178, 95, 0.55);
+}
+
+.character-card small {
+  color: rgba(246, 239, 226, 0.72);
+}
+
+.mono {
+  font-family: "JetBrains Mono", monospace;
 }
 
 .snapshot-box pre {
@@ -125,6 +227,14 @@ dt {
   }
 
   .status-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .character-grid {
     grid-template-columns: 1fr;
   }
 }
