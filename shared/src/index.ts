@@ -65,10 +65,51 @@ export type CharacterSelectState = {
   turnDeadline: number;
 };
 
+export type CardType = "move" | "attack" | "defense" | "energy_recover" | "hp_recover";
+
+export type Card = {
+  id: string;
+  name: string;
+  type: CardType;
+  energyCost: number;
+  energyGain: number;
+  damage: number;
+  defenseValue: number;
+  summary: string;
+};
+
+export type BattlePlayerState = {
+  role: RoomRole;
+  characterId?: string;
+  health: number;
+  energy: number;
+  position: number;
+};
+
+export type CardSelectionState = {
+  role: RoomRole;
+  selectedCardIds: string[];
+  confirmed: boolean;
+  timedOut: boolean;
+  totalEnergyCost: number;
+};
+
+export type CardSelectState = {
+  availableCards: Card[];
+  selections: CardSelectionState[];
+  round: number;
+  turnDeadline: number;
+};
+
 export type GameState = {
   phase: GamePhase;
   turnDeadline?: number;
   characterSelect?: CharacterSelectState;
+  cardSelect?: CardSelectState;
+  battleState?: {
+    round: number;
+    players: BattlePlayerState[];
+  };
 };
 
 export type PlayerSession = {
@@ -84,6 +125,10 @@ export type RoomJoinPayload = {
 
 export type CharacterSelectPayload = {
   characterId: string;
+};
+
+export type CardsPayload = {
+  selectedCardIds: string[];
 };
 
 export type RoomEventPayload = {
@@ -111,6 +156,8 @@ export type ClientToServerEvents = {
   "room:join": (payload: RoomJoinPayload) => void;
   "character:select": (payload: CharacterSelectPayload) => void;
   "character:confirm": (payload: CharacterSelectPayload) => void;
+  "cards:update": (payload: CardsPayload) => void;
+  "cards:confirm": (payload: CardsPayload) => void;
 };
 
 export type ServerToClientEvents = {
@@ -121,4 +168,6 @@ export type ServerToClientEvents = {
   "match:ready": (payload: { gameState: GameState }) => void;
   "character:phase_started": (payload: { remainingSeconds: number; gameState: GameState }) => void;
   "character:opponent_confirmed": (payload: { confirmed: boolean; role: RoomRole }) => void;
+  "cards:phase_started": (payload: { remainingSeconds: number; gameState: GameState }) => void;
+  "cards:opponent_confirmed": (payload: { confirmed: boolean; role: RoomRole }) => void;
 };

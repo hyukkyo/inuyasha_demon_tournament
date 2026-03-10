@@ -1,8 +1,12 @@
 import {
   CHARACTER_SELECT_TIMEOUT_SECONDS,
+  CARD_SELECT_TIMEOUT_SECONDS,
   ROOM_EXPIRATION_MINUTES,
   ROOM_ID_LENGTH,
+  type BattlePlayerState,
   type CharacterSelectState,
+  type CardSelectState,
+  type Card,
   type GameState,
   type PlayerSession,
   type RoomErrorCode,
@@ -20,6 +24,12 @@ type PlayerRecord = {
   characterId?: string;
   characterConfirmed: boolean;
   characterTimedOut: boolean;
+  selectedCardIds: string[];
+  cardsConfirmed: boolean;
+  cardsTimedOut: boolean;
+  health: number;
+  energy: number;
+  position: number;
 };
 
 export type RoomRecord = {
@@ -69,6 +79,12 @@ export const createRoom = (rooms: RoomStore, socketId: string, now: number) => {
         socketId,
         characterConfirmed: false,
         characterTimedOut: false,
+        selectedCardIds: [],
+        cardsConfirmed: false,
+        cardsTimedOut: false,
+        health: 30,
+        energy: 5,
+        position: 0,
       },
     ],
   };
@@ -106,6 +122,12 @@ export const joinRoom = (
     socketId,
     characterConfirmed: false,
     characterTimedOut: false,
+    selectedCardIds: [],
+    cardsConfirmed: false,
+    cardsTimedOut: false,
+    health: 30,
+    energy: 5,
+    position: 2,
   };
 
   room.players[1] = guest;
@@ -238,6 +260,90 @@ export const allPlayersConfirmedCharacters = (room: RoomRecord) => {
   return room.players
     .filter((player): player is PlayerRecord => Boolean(player))
     .every((player) => player.characterConfirmed);
+};
+
+const toBattlePlayerState = (player: PlayerRecord): BattlePlayerState => ({
+  role: player.role,
+  characterId: player.characterId,
+  health: player.health,
+  energy: player.energy,
+  position: player.position,
+});
+
+export const startCardSelect = (room: RoomRecord, cards: Card[], now: number) => {
+  const turnDeadline = now + CARD_SELECT_TIMEOUT_SECONDS * 1000;
+
+  for (const player of room.players) {
+    if (!player) {
+      continue;
+    }
+
+    player.selectedCardIds = [];
+    player.cardsConfirmed = false;
+    player.cardsTimedOut = false;
+  }
+
+  room.gameState = {
+    phase: "card_select",
+    turnDeadline,
+    battleState: {
+      round: 1,
+      players: room.players
+        .filter((player): player is PlayerRecord => Boolean(player))
+        .map(toBattlePlayerState),
+    },
+    cardSelect: {
+      availableCards: cards,
+      selections: room.players
+        .filter((player): player is PlayerRecord => Boolean(player))
+        .map((player) => ({
+          role: player.role,
+          selectedCardIds: player.selectedCardIds,
+          confirmed: player.cardsConfirmed,
+          timedOut: player.cardsTimedOut,
+          totalEnergyCost: 0,
+        })),
+      round: 1,
+      turnDeadline,
+    },
+  };
+};
+
+export const syncCardSelectState = (room: RoomRecord, cards: Card[]) => {
+  if (!room.gameState) {
+    return;
+  }
+
+  room.gameState.phase = "card_select";
+  room.gameState.cardSelect = {
+    availableCards: cards,
+    selections: room.players
+      .filter((player): player is PlayerRecord => Boolean(player))
+      .map((player) => ({
+        role: player.role,
+        selectedCardIds: player.selectedCardIds,
+        confirmed: player.cardsConfirmed,
+        timedOut: player.cardsTimedOut,
+        totalEnergyCost: player.selectedCardIds.reduce((sum, cardId) => {
+          const card = cards.find((entry) => entry.id === cardId);
+          return sum + (card?.energyCost ?? 0);
+        }, 0),
+      })),
+    round: room.gameState.battleState?.round ?? 1,
+    turnDeadline: room.gameState.turnDeadline ?? Date.now(),
+  };
+  room.gameState.battleState = {
+    round: room.gameState.battleState?.round ?? 1,
+    players: room.players
+      .filter((player): player is PlayerRecord => Boolean(player))
+      .map(toBattlePlayerState),
+  };
+};
+
+export const allPlayersConfirmedCards = (room: RoomRecord) => {
+  return room.players
+    .filter((player): player is PlayerRecord => Boolean(player))
+    .every((player) => player.cardsConfirmed);
 };
 
 export const toRoomState = (room: RoomRecord): RoomState => {

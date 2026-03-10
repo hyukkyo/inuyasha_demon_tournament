@@ -192,6 +192,13 @@ dt {
   margin-bottom: 1rem;
 }
 
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
 .character-card {
   display: flex;
   flex-direction: column;
@@ -205,6 +212,47 @@ dt {
 .character-card.is-active {
   background: linear-gradient(180deg, rgba(246, 178, 95, 0.28), rgba(255, 255, 255, 0.08));
   outline: 1px solid rgba(246, 178, 95, 0.55);
+}
+
+.card-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #f6efe2;
+}
+
+.card-option.is-active {
+  background: linear-gradient(180deg, rgba(246, 178, 95, 0.28), rgba(255, 255, 255, 0.08));
+  outline: 1px solid rgba(246, 178, 95, 0.55);
+}
+
+.selected-cards {
+  margin: 1rem 0;
+  padding: 1rem;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.selected-card-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.selected-card-row:last-child {
+  border-bottom: 0;
+}
+
+.slot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 .character-card small {
@@ -236,5 +284,14 @@ dt {
 
   .character-grid {
     grid-template-columns: 1fr;
+  }
+
+  .card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .selected-card-row {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

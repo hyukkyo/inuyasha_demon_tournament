@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { create } from "zustand";
 import { io, type Socket } from "socket.io-client";
 import type {
+  Card,
   Character,
   ClientToServerEvents,
   GameState,
@@ -21,6 +22,7 @@ type ConnectionState = {
   playerSession?: PlayerSession;
   roomError?: RoomErrorPayload;
   opponentConfirmedRole?: RoomRole;
+  opponentCardsConfirmedRole?: RoomRole;
   socket?: Socket<ServerToClientEvents, ClientToServerEvents>;
   connect: () => void;
   disconnect: () => void;
@@ -29,6 +31,8 @@ type ConnectionState = {
   joinRoom: (roomId: string) => void;
   selectCharacter: (characterId: string) => void;
   confirmCharacter: (characterId: string) => void;
+  updateCards: (selectedCardIds: string[]) => void;
+  confirmCards: (selectedCardIds: string[]) => void;
 };
 
 const serverUrl = import.meta.env.VITE_SERVER_URL ?? "http://localhost:3001";
@@ -41,6 +45,7 @@ const useConnectionStore = create<ConnectionState>((set, get) => ({
   playerSession: undefined,
   roomError: undefined,
   opponentConfirmedRole: undefined,
+  opponentCardsConfirmedRole: undefined,
   socket: undefined,
   connect: () => {
     if (get().socket) {
@@ -78,6 +83,8 @@ const useConnectionStore = create<ConnectionState>((set, get) => ({
         },
         gameState: undefined,
         roomError: undefined,
+        opponentConfirmedRole: undefined,
+        opponentCardsConfirmedRole: undefined,
       });
     });
 
@@ -91,6 +98,8 @@ const useConnectionStore = create<ConnectionState>((set, get) => ({
         },
         gameState: undefined,
         roomError: undefined,
+        opponentConfirmedRole: undefined,
+        opponentCardsConfirmedRole: undefined,
       });
     });
 
@@ -103,12 +112,22 @@ const useConnectionStore = create<ConnectionState>((set, get) => ({
     });
 
     socket.on("character:phase_started", (payload) => {
-      set({ gameState: payload.gameState });
+      set({ gameState: payload.gameState, opponentConfirmedRole: undefined });
     });
 
     socket.on("character:opponent_confirmed", (payload) => {
       if (payload.confirmed) {
         set({ opponentConfirmedRole: payload.role });
+      }
+    });
+
+    socket.on("cards:phase_started", (payload) => {
+      set({ gameState: payload.gameState, opponentCardsConfirmedRole: undefined });
+    });
+
+    socket.on("cards:opponent_confirmed", (payload) => {
+      if (payload.confirmed) {
+        set({ opponentCardsConfirmedRole: payload.role });
       }
     });
 
@@ -124,6 +143,7 @@ const useConnectionStore = create<ConnectionState>((set, get) => ({
       playerSession: undefined,
       roomError: undefined,
       opponentConfirmedRole: undefined,
+      opponentCardsConfirmedRole: undefined,
     });
   },
   sendPing: () => {
@@ -141,6 +161,12 @@ const useConnectionStore = create<ConnectionState>((set, get) => ({
   confirmCharacter: (characterId: string) => {
     get().socket?.emit("character:confirm", { characterId });
   },
+  updateCards: (selectedCardIds: string[]) => {
+    get().socket?.emit("cards:update", { selectedCardIds });
+  },
+  confirmCards: (selectedCardIds: string[]) => {
+    get().socket?.emit("cards:confirm", { selectedCardIds });
+  },
 }));
 
 export const App = () => {
@@ -151,6 +177,9 @@ export const App = () => {
   const playerSession = useConnectionStore((state) => state.playerSession);
   const roomError = useConnectionStore((state) => state.roomError);
   const opponentConfirmedRole = useConnectionStore((state) => state.opponentConfirmedRole);
+  const opponentCardsConfirmedRole = useConnectionStore(
+    (state) => state.opponentCardsConfirmedRole,
+  );
   const connect = useConnectionStore((state) => state.connect);
   const disconnect = useConnectionStore((state) => state.disconnect);
   const sendPing = useConnectionStore((state) => state.sendPing);
@@ -158,10 +187,13 @@ export const App = () => {
   const joinRoom = useConnectionStore((state) => state.joinRoom);
   const selectCharacter = useConnectionStore((state) => state.selectCharacter);
   const confirmCharacter = useConnectionStore((state) => state.confirmCharacter);
+  const updateCards = useConnectionStore((state) => state.updateCards);
+  const confirmCards = useConnectionStore((state) => state.confirmCards);
   const [roomIdInput, setRoomIdInput] = useState("");
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
 
   const characterSelect = gameState?.characterSelect;
+  const cardSelect = gameState?.cardSelect;
   const mySelection = characterSelect?.selections.find(
     (selection) => selection.role === playerSession?.role,
   );
@@ -169,6 +201,14 @@ export const App = () => {
     (selection) => selection.role !== playerSession?.role,
   );
   const selectedCharacterId = mySelection?.characterId;
+  const myCardSelection = cardSelect?.selections.find(
+    (selection) => selection.role === playerSession?.role,
+  );
+  const opponentCardSelection = cardSelect?.selections.find(
+    (selection) => selection.role !== playerSession?.role,
+  );
+  const battleState = gameState?.battleState;
+  const myBattleState = battleState?.players.find((player) => player.role === playerSession?.role);
 
   useEffect(() => {
     connect();
@@ -206,6 +246,43 @@ export const App = () => {
     }
 
     confirmCharacter(selectedCharacterId);
+  };
+
+  const handleCardToggle = (card: Card) => {
+    const current = myCardSelection?.selectedCardIds ?? [];
+    const exists = current.includes(card.id);
+
+    if (exists) {
+      updateCards(current.filter((cardId) => cardId !== card.id));
+      return;
+    }
+
+    if (current.length >= 3) {
+      return;
+    }
+
+    updateCards([...current, card.id]);
+  };
+
+  const handleCardRemove = (cardId: string) => {
+    const current = myCardSelection?.selectedCardIds ?? [];
+    updateCards(current.filter((entry) => entry !== cardId));
+  };
+
+  const moveCard = (index: number, direction: -1 | 1) => {
+    const current = [...(myCardSelection?.selectedCardIds ?? [])];
+    const nextIndex = index + direction;
+
+    if (nextIndex < 0 || nextIndex >= current.length) {
+      return;
+    }
+
+    [current[index], current[nextIndex]] = [current[nextIndex], current[index]];
+    updateCards(current);
+  };
+
+  const handleCardsConfirm = () => {
+    confirmCards(myCardSelection?.selectedCardIds ?? []);
   };
 
   return (
@@ -387,6 +464,123 @@ export const App = () => {
           ) : (
             <p className="empty-state">
               Character select starts automatically when two players join the same room.
+            </p>
+          )}
+        </section>
+
+        <section className="room-box">
+          <h2>Card Select</h2>
+          {gameState?.phase === "card_select" && cardSelect ? (
+            <>
+              <div className="phase-meta">
+                <span>Remaining: {remainingSeconds ?? "-"}s</span>
+                <span>Round: {cardSelect.round}</span>
+                <span>
+                  Opponent confirmed:{" "}
+                  {opponentCardSelection?.confirmed ||
+                  opponentCardsConfirmedRole === opponentCardSelection?.role
+                    ? "yes"
+                    : "no"}
+                </span>
+              </div>
+              <dl className="detail-grid">
+                <div>
+                  <dt>Health</dt>
+                  <dd>{myBattleState?.health ?? "-"}</dd>
+                </div>
+                <div>
+                  <dt>Energy</dt>
+                  <dd>{myBattleState?.energy ?? "-"}</dd>
+                </div>
+                <div>
+                  <dt>Position</dt>
+                  <dd>{myBattleState?.position ?? "-"}</dd>
+                </div>
+                <div>
+                  <dt>Total Cost</dt>
+                  <dd>{myCardSelection?.totalEnergyCost ?? 0}</dd>
+                </div>
+              </dl>
+              <div className="selected-cards">
+                {(myCardSelection?.selectedCardIds ?? []).map((cardId, index) => (
+                  <div key={cardId} className="selected-card-row">
+                    <span>
+                      {index + 1}.{" "}
+                      {cardSelect.availableCards.find((card) => card.id === cardId)?.name ?? cardId}
+                    </span>
+                    <div className="slot-actions">
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => moveCard(index, -1)}
+                        disabled={Boolean(myCardSelection?.confirmed)}
+                      >
+                        Left
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => moveCard(index, 1)}
+                        disabled={Boolean(myCardSelection?.confirmed)}
+                      >
+                        Right
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => handleCardRemove(cardId)}
+                        disabled={Boolean(myCardSelection?.confirmed)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {(myCardSelection?.selectedCardIds?.length ?? 0) < 3 ? (
+                  <p className="empty-state">
+                    Select {(3 - (myCardSelection?.selectedCardIds.length ?? 0)).toString()} more
+                    card(s).
+                  </p>
+                ) : null}
+              </div>
+              <div className="card-grid">
+                {cardSelect.availableCards.map((card) => {
+                  const active = myCardSelection?.selectedCardIds.includes(card.id);
+
+                  return (
+                    <button
+                      key={card.id}
+                      type="button"
+                      className={`card-option${active ? " is-active" : ""}`}
+                      onClick={() => handleCardToggle(card)}
+                      disabled={
+                        Boolean(myCardSelection?.confirmed) ||
+                        (!active && (myCardSelection?.selectedCardIds.length ?? 0) >= 3)
+                      }
+                    >
+                      <strong>{card.name}</strong>
+                      <span>{card.type}</span>
+                      <small>{card.summary}</small>
+                      <small>Cost {card.energyCost}</small>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="actions">
+                <button
+                  onClick={handleCardsConfirm}
+                  disabled={
+                    Boolean(myCardSelection?.confirmed) ||
+                    (myCardSelection?.selectedCardIds.length ?? 0) !== 3
+                  }
+                >
+                  Confirm Cards
+                </button>
+              </div>
+            </>
+          ) : (
+            <p className="empty-state">
+              Card select starts after both players finish character selection.
             </p>
           )}
         </section>
