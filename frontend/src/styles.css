@@ -236,6 +236,26 @@ dt {
   background: rgba(255, 255, 255, 0.04);
 }
 
+.resolve-log {
+  display: grid;
+  gap: 1rem;
+}
+
+.resolve-step {
+  padding: 1rem;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.resolve-step h3 {
+  margin-top: 0;
+}
+
+.log-list {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
 .selected-card-row {
   display: flex;
   align-items: center;

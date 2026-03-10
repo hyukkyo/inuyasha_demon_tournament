@@ -209,6 +209,9 @@ export const App = () => {
   );
   const battleState = gameState?.battleState;
   const myBattleState = battleState?.players.find((player) => player.role === playerSession?.role);
+  const opponentBattleState = battleState?.players.find(
+    (player) => player.role !== playerSession?.role,
+  );
 
   useEffect(() => {
     connect();
@@ -288,11 +291,11 @@ export const App = () => {
   return (
     <main className="app-shell">
       <section className="panel">
-        <p className="eyebrow">MVP Step 3</p>
-        <h1>Room Lobby and Character Select</h1>
+        <p className="eyebrow">MVP Step 5</p>
+        <h1>Round Flow and Resolve Engine</h1>
         <p className="summary">
-          Create a room, join from a second browser, then confirm a character within 10
-          seconds. When both players confirm, the server advances to the next phase.
+          Complete the lobby flow, submit 3 cards, then watch the server resolve each pair
+          in order and either advance to the next round or finish the game.
         </p>
 
         <dl className="status-grid">
@@ -582,6 +585,83 @@ export const App = () => {
             <p className="empty-state">
               Card select starts after both players finish character selection.
             </p>
+          )}
+        </section>
+
+        <section className="room-box">
+          <h2>Battle State</h2>
+          {battleState ? (
+            <dl className="detail-grid">
+              <div>
+                <dt>Round</dt>
+                <dd>{battleState.round}</dd>
+              </div>
+              <div>
+                <dt>Phase</dt>
+                <dd>{gameState?.phase ?? "-"}</dd>
+              </div>
+              <div>
+                <dt>My HP / Energy / Pos</dt>
+                <dd>
+                  {myBattleState?.health ?? "-"}/{myBattleState?.energy ?? "-"}/
+                  {myBattleState?.position ?? "-"}
+                </dd>
+              </div>
+              <div>
+                <dt>Opponent HP / Energy / Pos</dt>
+                <dd>
+                  {opponentBattleState?.health ?? "-"}/{opponentBattleState?.energy ?? "-"}/
+                  {opponentBattleState?.position ?? "-"}
+                </dd>
+              </div>
+            </dl>
+          ) : (
+            <p className="empty-state">Battle state becomes available after character select.</p>
+          )}
+        </section>
+
+        <section className="room-box">
+          <h2>Resolve Log</h2>
+          {gameState?.resolveSteps && gameState.resolveSteps.length > 0 ? (
+            <div className="resolve-log">
+              {gameState.resolveSteps.map((step) => (
+                <article key={step.stepIndex} className="resolve-step">
+                  <h3>Pair {step.stepIndex + 1}</h3>
+                  <p className="empty-state">
+                    host: {step.revealedCards.host} / guest: {step.revealedCards.guest}
+                  </p>
+                  <ul className="log-list">
+                    {step.logs.map((log, index) => (
+                      <li key={`${step.stepIndex}-${index}`}>{log}</li>
+                    ))}
+                  </ul>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="empty-state">Resolve logs appear when the round is being simulated.</p>
+          )}
+        </section>
+
+        <section className="room-box">
+          <h2>Result</h2>
+          {gameState?.result ? (
+            <dl className="detail-grid">
+              <div>
+                <dt>Outcome</dt>
+                <dd>{gameState.result.outcome}</dd>
+              </div>
+              <div>
+                <dt>Winner</dt>
+                <dd>{gameState.result.winnerRole ?? "draw"}</dd>
+              </div>
+              <div>
+                <dt>Reason</dt>
+                <dd>{gameState.result.reason}</dd>
+              </div>
+            </dl>
+          ) : (
+            <p className="empty-state">The game result is shown here when a winner is decided.</p>
           )}
         </section>
 

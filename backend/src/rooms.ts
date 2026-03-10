@@ -270,7 +270,7 @@ const toBattlePlayerState = (player: PlayerRecord): BattlePlayerState => ({
   position: player.position,
 });
 
-export const startCardSelect = (room: RoomRecord, cards: Card[], now: number) => {
+export const startCardSelect = (room: RoomRecord, cards: Card[], now: number, round: number) => {
   const turnDeadline = now + CARD_SELECT_TIMEOUT_SECONDS * 1000;
 
   for (const player of room.players) {
@@ -287,7 +287,7 @@ export const startCardSelect = (room: RoomRecord, cards: Card[], now: number) =>
     phase: "card_select",
     turnDeadline,
     battleState: {
-      round: 1,
+      round,
       players: room.players
         .filter((player): player is PlayerRecord => Boolean(player))
         .map(toBattlePlayerState),
@@ -303,7 +303,7 @@ export const startCardSelect = (room: RoomRecord, cards: Card[], now: number) =>
           timedOut: player.cardsTimedOut,
           totalEnergyCost: 0,
         })),
-      round: 1,
+      round,
       turnDeadline,
     },
   };

@@ -101,6 +101,20 @@ export type CardSelectState = {
   turnDeadline: number;
 };
 
+export type ResolveStep = {
+  stepIndex: number;
+  revealedCards: Record<RoomRole, string>;
+  beforeState: BattlePlayerState[];
+  afterState: BattlePlayerState[];
+  logs: string[];
+};
+
+export type GameResult = {
+  winnerRole?: RoomRole;
+  reason: string;
+  outcome: "win" | "draw";
+};
+
 export type GameState = {
   phase: GamePhase;
   turnDeadline?: number;
@@ -110,6 +124,8 @@ export type GameState = {
     round: number;
     players: BattlePlayerState[];
   };
+  resolveSteps?: ResolveStep[];
+  result?: GameResult;
 };
 
 export type PlayerSession = {
@@ -170,4 +186,6 @@ export type ServerToClientEvents = {
   "character:opponent_confirmed": (payload: { confirmed: boolean; role: RoomRole }) => void;
   "cards:phase_started": (payload: { remainingSeconds: number; gameState: GameState }) => void;
   "cards:opponent_confirmed": (payload: { confirmed: boolean; role: RoomRole }) => void;
+  "resolve:step": (payload: ResolveStep) => void;
+  "game:finished": (payload: GameResult) => void;
 };

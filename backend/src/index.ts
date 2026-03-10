@@ -5,11 +5,13 @@ import { z } from "zod";
 import {
   CHARACTER_SELECT_TIMEOUT_SECONDS,
   CARD_SELECT_TIMEOUT_SECONDS,
+  MAX_ROUNDS,
   ROOM_ID_LENGTH,
   type CardsPayload,
   type CharacterSelectPayload,
   type ClientToServerEvents,
   type GameState,
+  type GameResult,
   type PlayerSession,
   type RoomErrorPayload,
   type RoomRole,
@@ -17,6 +19,7 @@ import {
 } from "@inuyasha/shared";
 import { CHARACTER_POOL, DEFAULT_CHARACTER_ID } from "./characters.js";
 import { CARD_POOL } from "./cards.js";
+import { checkGameEnd, resolveCardPair } from "./engine.js";
 import {
   allPlayersConfirmedCharacters,
   allPlayersConfirmedCards,
@@ -63,6 +66,7 @@ const rooms: RoomStore = new Map();
 const socketSessions: SocketSessionStore = new Map();
 const characterSelectTimers = new Map<string, NodeJS.Timeout>();
 const cardSelectTimers = new Map<string, NodeJS.Timeout>();
+const resolvingRooms = new Set<string>();
 
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
 
@@ -113,7 +117,7 @@ const clearCardSelectTimer = (roomId: string) => {
 
 const finishCharacterSelect = (room: RoomRecord, reason: string) => {
   clearCharacterSelectTimer(room.id);
-  startCardSelect(room, CARD_POOL, Date.now());
+  startCardSelect(room, CARD_POOL, Date.now(), 1);
   syncCardSelectState(room, CARD_POOL);
   io.to(room.id).emit("cards:phase_started", {
     remainingSeconds: CARD_SELECT_TIMEOUT_SECONDS,
@@ -262,14 +266,129 @@ const fillAutoCards = (room: RoomRecord, role: RoomRole) => {
   return selected.slice(0, 3);
 };
 
-const finishCardSelect = (room: RoomRecord, reason: string) => {
+const finishGame = (room: RoomRecord, result: GameResult) => {
+  clearCardSelectTimer(room.id);
+  room.status = "finished";
+  room.gameState = {
+    ...room.gameState,
+    phase: "finished",
+    turnDeadline: undefined,
+    result,
+  };
+  io.to(room.id).emit("game:finished", result);
+  emitRoomSnapshot(room, result.reason);
+};
+
+const beginNextCardSelect = (room: RoomRecord, message: string) => {
+  const nextRound = (room.gameState?.battleState?.round ?? 1) + 1;
+  startCardSelect(room, CARD_POOL, Date.now(), nextRound);
+  syncCardSelectState(room, CARD_POOL);
+  io.to(room.id).emit("cards:phase_started", {
+    remainingSeconds: CARD_SELECT_TIMEOUT_SECONDS,
+    gameState: room.gameState as GameState,
+  });
+  scheduleCardSelectDeadline(room);
+  emitRoomSnapshot(room, message);
+};
+
+const runResolveSequence = async (room: RoomRecord, reason: string) => {
+  if (resolvingRooms.has(room.id)) {
+    return;
+  }
+
+  resolvingRooms.add(room.id);
   clearCardSelectTimer(room.id);
   room.gameState = {
     ...room.gameState,
     phase: "resolving",
     turnDeadline: undefined,
+    resolveSteps: [],
   };
   emitRoomSnapshot(room, reason);
+
+  const host = room.players.find((entry) => entry?.role === "host");
+  const guest = room.players.find((entry) => entry?.role === "guest");
+
+  if (!host || !guest) {
+    resolvingRooms.delete(room.id);
+    return;
+  }
+
+  for (let index = 0; index < 3; index += 1) {
+    const hostCard = CARD_POOL.find((card) => card.id === host.selectedCardIds[index]);
+    const guestCard = CARD_POOL.find((card) => card.id === guest.selectedCardIds[index]);
+
+    if (!hostCard || !guestCard) {
+      continue;
+    }
+
+    const step = resolveCardPair({
+      hostCard,
+      guestCard,
+      players: [
+        {
+          role: "host",
+          characterId: host.characterId,
+          health: host.health,
+          energy: host.energy,
+          position: host.position,
+        },
+        {
+          role: "guest",
+          characterId: guest.characterId,
+          health: guest.health,
+          energy: guest.energy,
+          position: guest.position,
+        },
+      ],
+      stepIndex: index,
+    });
+
+    room.gameState = {
+      ...room.gameState,
+      phase: "resolving",
+      resolveSteps: [...(room.gameState?.resolveSteps ?? []), step],
+      battleState: {
+        round: room.gameState?.battleState?.round ?? 1,
+        players: step.afterState,
+      },
+    };
+    host.health = step.afterState.find((player) => player.role === "host")!.health;
+    host.energy = step.afterState.find((player) => player.role === "host")!.energy;
+    host.position = step.afterState.find((player) => player.role === "host")!.position;
+    guest.health = step.afterState.find((player) => player.role === "guest")!.health;
+    guest.energy = step.afterState.find((player) => player.role === "guest")!.energy;
+    guest.position = step.afterState.find((player) => player.role === "guest")!.position;
+
+    io.to(room.id).emit("resolve:step", step);
+    emitRoomSnapshot(room, `Resolved card pair ${index + 1}.`);
+
+    const result = checkGameEnd(step.afterState, room.gameState?.battleState?.round ?? 1);
+
+    if (result) {
+      finishGame(room, result);
+      resolvingRooms.delete(room.id);
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  const round = room.gameState?.battleState?.round ?? 1;
+  const finalResult = checkGameEnd(room.gameState?.battleState?.players ?? [], round);
+
+  if (finalResult) {
+    finishGame(room, finalResult);
+  } else if (round >= MAX_ROUNDS) {
+    finishGame(room, {
+      outcome: "draw",
+      reason: "Reached the maximum round limit.",
+    });
+  } else {
+    beginNextCardSelect(room, `Round ${round} resolved. Starting round ${round + 1}.`);
+  }
+
+  resolvingRooms.delete(room.id);
 };
 
 const scheduleCardSelectDeadline = (room: RoomRecord) => {
@@ -288,7 +407,7 @@ const scheduleCardSelectDeadline = (room: RoomRecord) => {
     }
 
     syncCardSelectState(room, CARD_POOL);
-    finishCardSelect(room, "Card select timed out and was auto-submitted.");
+    void runResolveSequence(room, "Card select timed out and was auto-submitted.");
   }, delay);
 
   cardSelectTimers.set(room.id, timer);
@@ -684,7 +803,7 @@ io.on("connection", (socket) => {
     emitRoomSnapshot(room, `${session.role} confirmed card selection.`);
 
     if (allPlayersConfirmedCards(room)) {
-      finishCardSelect(room, "Both players submitted their cards.");
+      void runResolveSequence(room, "Both players submitted their cards.");
     }
   });
 
