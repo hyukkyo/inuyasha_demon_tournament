@@ -1,4 +1,5 @@
 import {
+  BOARD_WIDTH,
   CHARACTER_SELECT_TIMEOUT_SECONDS,
   CARD_SELECT_TIMEOUT_SECONDS,
   ROOM_EXPIRATION_MINUTES,
@@ -14,6 +15,10 @@ import {
   type RoomState,
   type RoomStatus,
 } from "@inuyasha/shared";
+
+const INITIAL_HEALTH = 100;
+const INITIAL_ENERGY = 100;
+const ROUND_ENERGY_RECOVERY = 20;
 
 type PlayerRecord = {
   id: string;
@@ -82,9 +87,9 @@ export const createRoom = (rooms: RoomStore, socketId: string, now: number) => {
         selectedCardIds: [],
         cardsConfirmed: false,
         cardsTimedOut: false,
-        health: 30,
-        energy: 5,
-        position: 0,
+        health: INITIAL_HEALTH,
+        energy: INITIAL_ENERGY,
+        position: BOARD_WIDTH,
       },
     ],
   };
@@ -125,9 +130,9 @@ export const joinRoom = (
     selectedCardIds: [],
     cardsConfirmed: false,
     cardsTimedOut: false,
-    health: 30,
-    energy: 5,
-    position: 2,
+    health: INITIAL_HEALTH,
+    energy: INITIAL_ENERGY,
+    position: BOARD_WIDTH * 2 - 1,
   };
 
   room.players[1] = guest;
@@ -272,12 +277,22 @@ const toBattlePlayerState = (player: PlayerRecord): BattlePlayerState => ({
 
 export const startCardSelect = (room: RoomRecord, cards: Card[], now: number, round: number) => {
   const turnDeadline = now + CARD_SELECT_TIMEOUT_SECONDS * 1000;
+  const commonCards = cards.filter((card) => card.scope === "common");
+  const signatureCardsByRole = Object.fromEntries(
+    room.players
+      .filter((player): player is PlayerRecord => Boolean(player))
+      .map((player) => [
+        player.role,
+        cards.filter((card) => card.ownerCharacterId === player.characterId),
+      ]),
+  ) as Partial<Record<RoomRole, Card[]>>;
 
   for (const player of room.players) {
     if (!player) {
       continue;
     }
 
+    player.energy = Math.min(INITIAL_ENERGY, player.energy + ROUND_ENERGY_RECOVERY);
     player.selectedCardIds = [];
     player.cardsConfirmed = false;
     player.cardsTimedOut = false;
@@ -294,6 +309,8 @@ export const startCardSelect = (room: RoomRecord, cards: Card[], now: number, ro
     },
     cardSelect: {
       availableCards: cards,
+      commonCards,
+      signatureCardsByRole,
       selections: room.players
         .filter((player): player is PlayerRecord => Boolean(player))
         .map((player) => ({
@@ -314,9 +331,21 @@ export const syncCardSelectState = (room: RoomRecord, cards: Card[]) => {
     return;
   }
 
+  const commonCards = cards.filter((card) => card.scope === "common");
+  const signatureCardsByRole = Object.fromEntries(
+    room.players
+      .filter((player): player is PlayerRecord => Boolean(player))
+      .map((player) => [
+        player.role,
+        cards.filter((card) => card.ownerCharacterId === player.characterId),
+      ]),
+  ) as Partial<Record<RoomRole, Card[]>>;
+
   room.gameState.phase = "card_select";
   room.gameState.cardSelect = {
     availableCards: cards,
+    commonCards,
+    signatureCardsByRole,
     selections: room.players
       .filter((player): player is PlayerRecord => Boolean(player))
       .map((player) => ({

@@ -9,6 +9,7 @@ import {
   RECONNECT_TIMEOUT_SECONDS,
   ROOM_ID_LENGTH,
   type CardsPayload,
+  type Card,
   type CharacterSelectPayload,
   type ClientToServerEvents,
   type GameState,
@@ -20,7 +21,7 @@ import {
   type ServerToClientEvents,
 } from "@inuyasha/shared";
 import { CHARACTER_POOL, DEFAULT_CHARACTER_ID } from "./characters.js";
-import { CARD_POOL } from "./cards.js";
+import { CARD_LOOKUP, getSelectableCardPool } from "./cards.js";
 import { checkGameEnd, resolveCardPair } from "./engine.js";
 import {
   allPlayersConfirmedCharacters,
@@ -138,6 +139,22 @@ const clearReconnectTimer = (roomId: string) => {
   }
 };
 
+const getRoomCardPool = (room: RoomRecord) => {
+  const cardMap = new Map<string, Card>();
+
+  for (const player of room.players) {
+    if (!player) {
+      continue;
+    }
+
+    for (const card of getSelectableCardPool(player.characterId)) {
+      cardMap.set(card.id, card);
+    }
+  }
+
+  return [...cardMap.values()];
+};
+
 const destroyRoom = (roomId: string) => {
   clearCharacterSelectTimer(roomId);
   clearCardSelectTimer(roomId);
@@ -154,8 +171,9 @@ const destroyRoom = (roomId: string) => {
 
 const finishCharacterSelect = (room: RoomRecord, reason: string) => {
   clearCharacterSelectTimer(room.id);
-  startCardSelect(room, CARD_POOL, Date.now(), 1);
-  syncCardSelectState(room, CARD_POOL);
+  const roomCardPool = getRoomCardPool(room);
+  startCardSelect(room, roomCardPool, Date.now(), 1);
+  syncCardSelectState(room, roomCardPool);
   io.to(room.id).emit("cards:phase_started", {
     remainingSeconds: CARD_SELECT_TIMEOUT_SECONDS,
     gameState: room.gameState as GameState,
@@ -289,7 +307,8 @@ const validateCardSelection = (
     };
   }
 
-  const cards = selectedCardIds.map((cardId) => CARD_POOL.find((card) => card.id === cardId));
+  const roomCardPool = getRoomCardPool(room);
+  const cards = selectedCardIds.map((cardId) => roomCardPool.find((card) => card.id === cardId));
 
   if (cards.some((card) => !card)) {
     return {
@@ -302,15 +321,28 @@ const validateCardSelection = (
   }
 
   const totalEnergyCost = cards.reduce((sum, card) => sum + (card?.energyCost ?? 0), 0);
+  let projectedEnergy = player.energy;
 
-  if (totalEnergyCost > player.energy) {
-    return {
-      ok: false,
-      error: {
-        code: "INVALID_ROOM_ID",
-        message: `Selected cards require ${totalEnergyCost} energy, but only ${player.energy} is available.`,
-      },
-    };
+  for (const card of cards) {
+    if (!card) {
+      continue;
+    }
+
+    if (card.energyCost > projectedEnergy) {
+      return {
+        ok: false,
+        error: {
+          code: "INVALID_ROOM_ID",
+          message: `${card.name} requires ${card.energyCost} energy, but only ${projectedEnergy} is available at that step.`,
+        },
+      };
+    }
+
+    projectedEnergy = Math.max(projectedEnergy - card.energyCost, 0);
+
+    if (card.type === "energy_recover") {
+      projectedEnergy += card.energyGain;
+    }
   }
 
   return {
@@ -326,14 +358,15 @@ const fillAutoCards = (room: RoomRecord, role: RoomRole) => {
     return [];
   }
 
+  const roomCardPool = getRoomCardPool(room);
   const selected = [...player.selectedCardIds];
-  const remainingCards = [...CARD_POOL]
+  const remainingCards = [...roomCardPool]
     .filter((card) => !selected.includes(card.id))
     .sort((left, right) => left.energyCost - right.energyCost);
 
   while (selected.length < 3) {
     const usedEnergy = selected.reduce((sum, cardId) => {
-      const card = CARD_POOL.find((entry) => entry.id === cardId);
+      const card = roomCardPool.find((entry) => entry.id === cardId);
       return sum + (card?.energyCost ?? 0);
     }, 0);
     const nextCard = remainingCards.find((card) => usedEnergy + card.energyCost <= player.energy);
@@ -366,8 +399,9 @@ const finishGame = (room: RoomRecord, result: GameResult) => {
 
 const beginNextCardSelect = (room: RoomRecord, message: string) => {
   const nextRound = (room.gameState?.battleState?.round ?? 1) + 1;
-  startCardSelect(room, CARD_POOL, Date.now(), nextRound);
-  syncCardSelectState(room, CARD_POOL);
+  const roomCardPool = getRoomCardPool(room);
+  startCardSelect(room, roomCardPool, Date.now(), nextRound);
+  syncCardSelectState(room, roomCardPool);
   io.to(room.id).emit("cards:phase_started", {
     remainingSeconds: CARD_SELECT_TIMEOUT_SECONDS,
     gameState: room.gameState as GameState,
@@ -411,8 +445,8 @@ const runResolveSequence = async (room: RoomRecord, reason: string, resetSteps =
       return;
     }
 
-    const hostCard = CARD_POOL.find((card) => card.id === host.selectedCardIds[index]);
-    const guestCard = CARD_POOL.find((card) => card.id === guest.selectedCardIds[index]);
+    const hostCard = CARD_LOOKUP.get(host.selectedCardIds[index]);
+    const guestCard = CARD_LOOKUP.get(guest.selectedCardIds[index]);
 
     if (!hostCard || !guestCard) {
       continue;
@@ -548,7 +582,7 @@ const scheduleCardSelectDeadline = (room: RoomRecord) => {
       player.cardsTimedOut = true;
     }
 
-    syncCardSelectState(room, CARD_POOL);
+    syncCardSelectState(room, getRoomCardPool(room));
     void runResolveSequence(room, "Card select timed out and was auto-submitted.");
   }, delay);
 
@@ -974,7 +1008,7 @@ io.on("connection", (socket) => {
     player.selectedCardIds = parseResult.data.selectedCardIds;
     player.cardsConfirmed = false;
     player.cardsTimedOut = false;
-    syncCardSelectState(room, CARD_POOL);
+    syncCardSelectState(room, getRoomCardPool(room));
     emitRoomSnapshot(room, `${session.role} updated card selection.`);
   });
 
@@ -1029,7 +1063,7 @@ io.on("connection", (socket) => {
     player.selectedCardIds = parseResult.data.selectedCardIds;
     player.cardsConfirmed = true;
     player.cardsTimedOut = false;
-    syncCardSelectState(room, CARD_POOL);
+    syncCardSelectState(room, getRoomCardPool(room));
     socket.to(room.id).emit("cards:opponent_confirmed", {
       confirmed: true,
       role: session.role,

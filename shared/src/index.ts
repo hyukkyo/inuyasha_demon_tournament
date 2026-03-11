@@ -4,6 +4,10 @@ export const CHARACTER_SELECT_TIMEOUT_SECONDS = 10;
 export const CARD_SELECT_TIMEOUT_SECONDS = 30;
 export const RECONNECT_TIMEOUT_SECONDS = 30;
 export const MAX_ROUNDS = 100;
+export const BOARD_WIDTH = 4;
+export const BOARD_HEIGHT = 3;
+export const BOARD_CELL_COUNT = BOARD_WIDTH * BOARD_HEIGHT;
+export const ATTACK_PATTERN_RADIUS = 3;
 
 export type GamePhase =
   | "waiting"
@@ -42,11 +46,40 @@ export type RoomState = {
 
 export type CharacterArchetype = "swordsman" | "spearman" | "caster" | "archer";
 
+export type CardId = string;
+export type CharacterId = string;
+
+export type BoardPosition = number;
+
+export type RelativeCell = {
+  dx: number;
+  dy: number;
+};
+
+export type AttackPattern = {
+  radius: number;
+  cells: RelativeCell[];
+};
+
+export type MovePattern = {
+  cells: RelativeCell[];
+};
+
+export type CardScope = "common" | "signature";
+
+export type CharacterCardPreview = {
+  cardId: CardId;
+  name: string;
+  summary: string;
+};
+
 export type Character = {
-  id: string;
+  id: CharacterId;
   name: string;
   archetype: CharacterArchetype;
   summary: string;
+  signatureCardIds: CardId[];
+  signatureCards: CharacterCardPreview[];
 };
 
 export type CharacterSelectionPublicState = {
@@ -68,22 +101,27 @@ export type CharacterSelectState = {
 export type CardType = "move" | "attack" | "defense" | "energy_recover" | "hp_recover";
 
 export type Card = {
-  id: string;
+  id: CardId;
   name: string;
   type: CardType;
+  scope: CardScope;
+  ownerCharacterId?: CharacterId;
   energyCost: number;
   energyGain: number;
   damage: number;
   defenseValue: number;
+  healAmount: number;
   summary: string;
+  movePattern?: MovePattern;
+  attackPattern?: AttackPattern;
 };
 
 export type BattlePlayerState = {
   role: RoomRole;
-  characterId?: string;
+  characterId?: CharacterId;
   health: number;
   energy: number;
-  position: number;
+  position: BoardPosition;
 };
 
 export type CardSelectionState = {
@@ -96,16 +134,92 @@ export type CardSelectionState = {
 
 export type CardSelectState = {
   availableCards: Card[];
+  commonCards: Card[];
+  signatureCardsByRole: Partial<Record<RoomRole, Card[]>>;
   selections: CardSelectionState[];
   round: number;
   turnDeadline: number;
 };
+
+export type ResolveEvent =
+  | {
+      type: "pair_reveal";
+      hostCardId: CardId;
+      guestCardId: CardId;
+    }
+  | {
+      type: "turn_order";
+      first: RoomRole;
+      second: RoomRole;
+      simultaneous: boolean;
+    }
+  | {
+      type: "move";
+      role: RoomRole;
+      cardId: CardId;
+      from: BoardPosition;
+      to: BoardPosition;
+    }
+  | {
+      type: "guard_ready";
+      role: RoomRole;
+      cardId: CardId;
+      value: number;
+    }
+  | {
+      type: "energy_restore";
+      role: RoomRole;
+      cardId: CardId;
+      amount: number;
+      before: number;
+      after: number;
+    }
+  | {
+      type: "hp_restore";
+      role: RoomRole;
+      cardId: CardId;
+      amount: number;
+      before: number;
+      after: number;
+    }
+  | {
+      type: "attack_reveal";
+      role: RoomRole;
+      cardId: CardId;
+      targetCells: BoardPosition[];
+    }
+  | {
+      type: "attack_hit";
+      role: RoomRole;
+      cardId: CardId;
+      targetRole: RoomRole;
+      targetCell: BoardPosition;
+      damage: number;
+      blocked: number;
+      beforeHp: number;
+      afterHp: number;
+    }
+  | {
+      type: "attack_miss";
+      role: RoomRole;
+      cardId: CardId;
+      targetCells: BoardPosition[];
+    }
+  | {
+      type: "ko";
+      role: RoomRole;
+    }
+  | {
+      type: "pair_end";
+      afterState: BattlePlayerState[];
+    };
 
 export type ResolveStep = {
   stepIndex: number;
   revealedCards: Record<RoomRole, string>;
   beforeState: BattlePlayerState[];
   afterState: BattlePlayerState[];
+  events: ResolveEvent[];
   logs: string[];
 };
 
