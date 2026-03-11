@@ -251,6 +251,25 @@ dt {
   margin-top: 0;
 }
 
+.result-panel {
+  padding: 1rem;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(246, 178, 95, 0.14), rgba(255, 255, 255, 0.04));
+}
+
+.result-kicker {
+  margin-bottom: 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #f6b25f;
+}
+
+.result-title {
+  margin-top: 0;
+}
+
 .log-list {
   margin: 0;
   padding-left: 1.2rem;

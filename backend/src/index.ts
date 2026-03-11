@@ -6,6 +6,7 @@ import {
   CHARACTER_SELECT_TIMEOUT_SECONDS,
   CARD_SELECT_TIMEOUT_SECONDS,
   MAX_ROUNDS,
+  RECONNECT_TIMEOUT_SECONDS,
   ROOM_ID_LENGTH,
   type CardsPayload,
   type CharacterSelectPayload,
@@ -13,6 +14,7 @@ import {
   type GameState,
   type GameResult,
   type PlayerSession,
+  type RoomReconnectPayload,
   type RoomErrorPayload,
   type RoomRole,
   type ServerToClientEvents,
@@ -25,6 +27,7 @@ import {
   allPlayersConfirmedCards,
   cleanupExpiredRooms,
   createRoom,
+  findPlayerByToken,
   joinRoom,
   markConnected,
   markDisconnected,
@@ -50,12 +53,22 @@ const roomJoinPayloadSchema = z.object({
   playerToken: z.string().trim().optional(),
 });
 
+const roomReconnectPayloadSchema = z.object({
+  roomId: z.string().trim().length(ROOM_ID_LENGTH),
+  playerToken: z.string().trim().min(1),
+});
+
 const characterSelectPayloadSchema = z.object({
   characterId: z.string().trim().min(1),
 });
 
 const cardsPayloadSchema = z.object({
   selectedCardIds: z.array(z.string().trim().min(1)).max(3),
+});
+
+const leavePayloadSchema = z.object({
+  roomId: z.string().trim().length(ROOM_ID_LENGTH),
+  playerToken: z.string().trim().min(1),
 });
 
 const app = Fastify({
@@ -66,6 +79,7 @@ const rooms: RoomStore = new Map();
 const socketSessions: SocketSessionStore = new Map();
 const characterSelectTimers = new Map<string, NodeJS.Timeout>();
 const cardSelectTimers = new Map<string, NodeJS.Timeout>();
+const reconnectTimers = new Map<string, NodeJS.Timeout>();
 const resolvingRooms = new Set<string>();
 
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -112,6 +126,29 @@ const clearCardSelectTimer = (roomId: string) => {
   if (timer) {
     clearTimeout(timer);
     cardSelectTimers.delete(roomId);
+  }
+};
+
+const clearReconnectTimer = (roomId: string) => {
+  const timer = reconnectTimers.get(roomId);
+
+  if (timer) {
+    clearTimeout(timer);
+    reconnectTimers.delete(roomId);
+  }
+};
+
+const destroyRoom = (roomId: string) => {
+  clearCharacterSelectTimer(roomId);
+  clearCardSelectTimer(roomId);
+  clearReconnectTimer(roomId);
+  resolvingRooms.delete(roomId);
+  rooms.delete(roomId);
+
+  for (const [socketId, session] of socketSessions) {
+    if (session.roomId === roomId) {
+      socketSessions.delete(socketId);
+    }
   }
 };
 
@@ -166,6 +203,52 @@ const beginCharacterSelect = (room: RoomRecord) => {
     gameState: room.gameState as GameState,
   });
   emitRoomSnapshot(room, "Character select phase started.");
+};
+
+const pauseRoomForReconnect = (room: RoomRecord, disconnectedRole: RoomRole) => {
+  if (
+    !room.gameState ||
+    room.gameState.phase === "finished" ||
+    room.gameState.phase === "paused_reconnect" ||
+    room.gameState.phase === "waiting"
+  ) {
+    return;
+  }
+
+  clearCharacterSelectTimer(room.id);
+  clearCardSelectTimer(room.id);
+
+  const pausedState = room.gameState.phase;
+  const pausedRemainingMs =
+    pausedState === "character_select" || pausedState === "card_select"
+      ? Math.max((room.gameState.turnDeadline ?? Date.now()) - Date.now(), 0)
+      : 0;
+
+  room.gameState = {
+    ...room.gameState,
+    phase: "paused_reconnect",
+    pausedState,
+    pausedRemainingMs,
+    reconnectDeadline: Date.now() + RECONNECT_TIMEOUT_SECONDS * 1000,
+    disconnectedPlayerRole: disconnectedRole,
+  };
+
+  io.to(room.id).emit("game:paused_reconnect", {
+    disconnectedPlayerRole: disconnectedRole,
+    remainingReconnectSeconds: RECONNECT_TIMEOUT_SECONDS,
+  });
+  emitRoomSnapshot(room, `${disconnectedRole} disconnected. Waiting for reconnect.`);
+
+  clearReconnectTimer(room.id);
+  const timer = setTimeout(() => {
+    finishGame(room, {
+      outcome: "win",
+      winnerRole: disconnectedRole === "host" ? "guest" : "host",
+      reason: `${disconnectedRole} failed to reconnect in time.`,
+    });
+  }, RECONNECT_TIMEOUT_SECONDS * 1000);
+
+  reconnectTimers.set(room.id, timer);
 };
 
 const validateCardSelection = (
@@ -268,6 +351,8 @@ const fillAutoCards = (room: RoomRecord, role: RoomRole) => {
 
 const finishGame = (room: RoomRecord, result: GameResult) => {
   clearCardSelectTimer(room.id);
+  clearCharacterSelectTimer(room.id);
+  clearReconnectTimer(room.id);
   room.status = "finished";
   room.gameState = {
     ...room.gameState,
@@ -291,7 +376,7 @@ const beginNextCardSelect = (room: RoomRecord, message: string) => {
   emitRoomSnapshot(room, message);
 };
 
-const runResolveSequence = async (room: RoomRecord, reason: string) => {
+const runResolveSequence = async (room: RoomRecord, reason: string, resetSteps = true) => {
   if (resolvingRooms.has(room.id)) {
     return;
   }
@@ -302,7 +387,11 @@ const runResolveSequence = async (room: RoomRecord, reason: string) => {
     ...room.gameState,
     phase: "resolving",
     turnDeadline: undefined,
-    resolveSteps: [],
+    pausedState: undefined,
+    pausedRemainingMs: undefined,
+    reconnectDeadline: undefined,
+    disconnectedPlayerRole: undefined,
+    resolveSteps: resetSteps ? [] : room.gameState?.resolveSteps ?? [],
   };
   emitRoomSnapshot(room, reason);
 
@@ -314,7 +403,14 @@ const runResolveSequence = async (room: RoomRecord, reason: string) => {
     return;
   }
 
-  for (let index = 0; index < 3; index += 1) {
+  const startIndex = room.gameState.resolveSteps?.length ?? 0;
+
+  for (let index = startIndex; index < 3; index += 1) {
+    if (room.gameState?.phase === "paused_reconnect") {
+      resolvingRooms.delete(room.id);
+      return;
+    }
+
     const hostCard = CARD_POOL.find((card) => card.id === host.selectedCardIds[index]);
     const guestCard = CARD_POOL.find((card) => card.id === guest.selectedCardIds[index]);
 
@@ -372,6 +468,11 @@ const runResolveSequence = async (room: RoomRecord, reason: string) => {
     }
 
     await new Promise((resolve) => setTimeout(resolve, 250));
+
+    if (room.gameState?.phase === "paused_reconnect") {
+      resolvingRooms.delete(room.id);
+      return;
+    }
   }
 
   const round = room.gameState?.battleState?.round ?? 1;
@@ -389,6 +490,47 @@ const runResolveSequence = async (room: RoomRecord, reason: string) => {
   }
 
   resolvingRooms.delete(room.id);
+};
+
+const resumeRoomAfterReconnect = (room: RoomRecord) => {
+  if (!room.gameState?.pausedState) {
+    return;
+  }
+
+  clearReconnectTimer(room.id);
+
+  const resumedState = room.gameState.pausedState;
+  const remainingMs = room.gameState.pausedRemainingMs ?? 0;
+  room.gameState = {
+    ...room.gameState,
+    phase: resumedState,
+    pausedState: undefined,
+    pausedRemainingMs: undefined,
+    reconnectDeadline: undefined,
+    disconnectedPlayerRole: undefined,
+    turnDeadline:
+      resumedState === "character_select" || resumedState === "card_select"
+        ? Date.now() + remainingMs
+        : undefined,
+  };
+
+  if (resumedState === "character_select") {
+    scheduleCharacterSelectDeadline(room);
+  }
+
+  if (resumedState === "card_select") {
+    scheduleCardSelectDeadline(room);
+  }
+
+  if (resumedState === "resolving") {
+    void runResolveSequence(room, "Resolving resumed after reconnect.", false);
+  }
+
+  io.to(room.id).emit("game:resumed", {
+    gameState: room.gameState,
+    remainingSeconds: Math.ceil(remainingMs / 1000),
+  });
+  emitRoomSnapshot(room, "Game resumed after reconnect.");
 };
 
 const scheduleCardSelectDeadline = (room: RoomRecord) => {
@@ -584,6 +726,98 @@ io.on("connection", (socket) => {
     if (room.players[0] && room.players[1]) {
       beginCharacterSelect(room);
     }
+  });
+
+  socket.on("room:reconnect", (payload) => {
+    const parseResult = roomReconnectPayloadSchema.safeParse(payload);
+
+    if (!parseResult.success) {
+      emitRoomError(socket, {
+        code: "INVALID_ROOM_ID",
+        message: "Reconnect payload is invalid.",
+      });
+      return;
+    }
+
+    const room = rooms.get(parseResult.data.roomId.toUpperCase());
+
+    if (!room) {
+      emitRoomError(socket, {
+        code: "ROOM_NOT_FOUND",
+        message: "The room does not exist.",
+      });
+      return;
+    }
+
+    const player = findPlayerByToken(room, parseResult.data.playerToken);
+
+    if (!player) {
+      emitRoomError(socket, {
+        code: "ROOM_NOT_FOUND",
+        message: "No matching player session was found.",
+      });
+      return;
+    }
+
+    const session: PlayerSession = {
+      roomId: room.id,
+      playerToken: player.token,
+      role: player.role,
+    };
+
+    socket.join(room.id);
+    socketSessions.set(socket.id, session);
+    markConnected(rooms, session, socket.id);
+
+    emitSnapshot(socket, "Reconnected successfully.", session);
+
+    if (
+      room.gameState?.phase === "paused_reconnect" &&
+      room.gameState.disconnectedPlayerRole === player.role
+    ) {
+      resumeRoomAfterReconnect(room);
+    }
+  });
+
+  socket.on("game:leave", (payload) => {
+    const parseResult = leavePayloadSchema.safeParse(payload);
+
+    if (!parseResult.success) {
+      emitRoomError(socket, {
+        code: "INVALID_ROOM_ID",
+        message: "Leave payload is invalid.",
+      });
+      return;
+    }
+
+    const room = rooms.get(parseResult.data.roomId.toUpperCase());
+
+    if (!room) {
+      socketSessions.delete(socket.id);
+      return;
+    }
+
+    const player = findPlayerByToken(room, parseResult.data.playerToken);
+
+    if (!player) {
+      emitRoomError(socket, {
+        code: "ROOM_NOT_FOUND",
+        message: "No matching player session was found.",
+      });
+      return;
+    }
+
+    io.to(room.id).emit("state:snapshot", {
+      serverTime: Date.now(),
+      phase: room.gameState?.phase ?? "finished",
+      message: `${player.role} left the game.`,
+      roomState: toRoomState(room),
+      gameState: room.gameState,
+    });
+
+    destroyRoom(room.id);
+    socket.leave(room.id);
+    socketSessions.delete(socket.id);
   });
 
   socket.on("character:select", (payload) => {
@@ -812,6 +1046,15 @@ io.on("connection", (socket) => {
 
     markDisconnected(rooms, session);
     socketSessions.delete(socket.id);
+
+    if (session) {
+      const room = rooms.get(session.roomId);
+
+      if (room) {
+        pauseRoomForReconnect(room, session.role);
+      }
+    }
+
     app.log.info({ socketId: socket.id, reason }, "socket disconnected");
   });
 });

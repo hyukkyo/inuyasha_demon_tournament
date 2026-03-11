@@ -118,6 +118,10 @@ export type GameResult = {
 export type GameState = {
   phase: GamePhase;
   turnDeadline?: number;
+  pausedState?: "character_select" | "card_select" | "resolving";
+  pausedRemainingMs?: number;
+  reconnectDeadline?: number;
+  disconnectedPlayerRole?: RoomRole;
   characterSelect?: CharacterSelectState;
   cardSelect?: CardSelectState;
   battleState?: {
@@ -139,12 +143,22 @@ export type RoomJoinPayload = {
   playerToken?: string;
 };
 
+export type RoomReconnectPayload = {
+  roomId: string;
+  playerToken: string;
+};
+
 export type CharacterSelectPayload = {
   characterId: string;
 };
 
 export type CardsPayload = {
   selectedCardIds: string[];
+};
+
+export type LeavePayload = {
+  roomId: string;
+  playerToken: string;
 };
 
 export type RoomEventPayload = {
@@ -170,6 +184,8 @@ export type ClientToServerEvents = {
   ping: (payload: { timestamp: number }) => void;
   "room:create": () => void;
   "room:join": (payload: RoomJoinPayload) => void;
+  "room:reconnect": (payload: RoomReconnectPayload) => void;
+  "game:leave": (payload: LeavePayload) => void;
   "character:select": (payload: CharacterSelectPayload) => void;
   "character:confirm": (payload: CharacterSelectPayload) => void;
   "cards:update": (payload: CardsPayload) => void;
@@ -187,5 +203,10 @@ export type ServerToClientEvents = {
   "cards:phase_started": (payload: { remainingSeconds: number; gameState: GameState }) => void;
   "cards:opponent_confirmed": (payload: { confirmed: boolean; role: RoomRole }) => void;
   "resolve:step": (payload: ResolveStep) => void;
+  "game:paused_reconnect": (payload: {
+    disconnectedPlayerRole: RoomRole;
+    remainingReconnectSeconds: number;
+  }) => void;
+  "game:resumed": (payload: { gameState: GameState; remainingSeconds: number }) => void;
   "game:finished": (payload: GameResult) => void;
 };

@@ -346,6 +346,10 @@ export const allPlayersConfirmedCards = (room: RoomRecord) => {
     .every((player) => player.cardsConfirmed);
 };
 
+export const findPlayerByToken = (room: RoomRecord, playerToken: string) => {
+  return room.players.find((player) => player?.token === playerToken);
+};
+
 export const toRoomState = (room: RoomRecord): RoomState => {
   return {
     roomId: room.id,

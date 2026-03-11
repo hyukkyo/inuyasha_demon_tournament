@@ -29,6 +29,8 @@ type ConnectionState = {
   sendPing: () => void;
   createRoom: () => void;
   joinRoom: (roomId: string) => void;
+  reconnectRoom: (roomId: string, playerToken: string) => void;
+  leaveGame: (roomId: string, playerToken: string) => void;
   selectCharacter: (characterId: string) => void;
   confirmCharacter: (characterId: string) => void;
   updateCards: (selectedCardIds: string[]) => void;
@@ -36,6 +38,7 @@ type ConnectionState = {
 };
 
 const serverUrl = import.meta.env.VITE_SERVER_URL ?? "http://localhost:3001";
+const SESSION_STORAGE_KEY = "inuyasha_demon_tournament_session";
 
 const useConnectionStore = create<ConnectionState>((set, get) => ({
   connected: false,
@@ -58,6 +61,16 @@ const useConnectionStore = create<ConnectionState>((set, get) => ({
 
     socket.on("connect", () => {
       set({ connected: true, roomError: undefined });
+
+      const rawSession = window.localStorage.getItem(SESSION_STORAGE_KEY);
+
+      if (rawSession) {
+        const parsed = JSON.parse(rawSession) as PlayerSession;
+        socket.emit("room:reconnect", {
+          roomId: parsed.roomId,
+          playerToken: parsed.playerToken,
+        });
+      }
     });
 
     socket.on("disconnect", () => {
@@ -131,6 +144,14 @@ const useConnectionStore = create<ConnectionState>((set, get) => ({
       }
     });
 
+    socket.on("game:resumed", (payload) => {
+      set({ gameState: payload.gameState });
+    });
+
+    socket.on("game:finished", () => {
+      window.localStorage.removeItem(SESSION_STORAGE_KEY);
+    });
+
     set({ socket });
   },
   disconnect: () => {
@@ -154,6 +175,21 @@ const useConnectionStore = create<ConnectionState>((set, get) => ({
   },
   joinRoom: (roomId: string) => {
     get().socket?.emit("room:join", { roomId: roomId.trim().toUpperCase() });
+  },
+  reconnectRoom: (roomId: string, playerToken: string) => {
+    get().socket?.emit("room:reconnect", { roomId, playerToken });
+  },
+  leaveGame: (roomId: string, playerToken: string) => {
+    get().socket?.emit("game:leave", { roomId, playerToken });
+    window.localStorage.removeItem(SESSION_STORAGE_KEY);
+    set({
+      roomState: undefined,
+      gameState: undefined,
+      playerSession: undefined,
+      roomError: undefined,
+      opponentConfirmedRole: undefined,
+      opponentCardsConfirmedRole: undefined,
+    });
   },
   selectCharacter: (characterId: string) => {
     get().socket?.emit("character:select", { characterId });
@@ -185,6 +221,8 @@ export const App = () => {
   const sendPing = useConnectionStore((state) => state.sendPing);
   const createRoom = useConnectionStore((state) => state.createRoom);
   const joinRoom = useConnectionStore((state) => state.joinRoom);
+  const reconnectRoom = useConnectionStore((state) => state.reconnectRoom);
+  const leaveGame = useConnectionStore((state) => state.leaveGame);
   const selectCharacter = useConnectionStore((state) => state.selectCharacter);
   const confirmCharacter = useConnectionStore((state) => state.confirmCharacter);
   const updateCards = useConnectionStore((state) => state.updateCards);
@@ -220,6 +258,12 @@ export const App = () => {
       disconnect();
     };
   }, [connect, disconnect]);
+
+  useEffect(() => {
+    if (playerSession) {
+      window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(playerSession));
+    }
+  }, [playerSession]);
 
   useEffect(() => {
     if (!gameState?.turnDeadline) {
@@ -288,14 +332,34 @@ export const App = () => {
     confirmCards(myCardSelection?.selectedCardIds ?? []);
   };
 
+  const handleReconnect = () => {
+    const rawSession = window.localStorage.getItem(SESSION_STORAGE_KEY);
+
+    if (!rawSession) {
+      return;
+    }
+
+    const parsed = JSON.parse(rawSession) as PlayerSession;
+    reconnectRoom(parsed.roomId, parsed.playerToken);
+  };
+
+  const handleLeaveGame = () => {
+    if (!playerSession) {
+      window.localStorage.removeItem(SESSION_STORAGE_KEY);
+      return;
+    }
+
+    leaveGame(playerSession.roomId, playerSession.playerToken);
+  };
+
   return (
     <main className="app-shell">
       <section className="panel">
-        <p className="eyebrow">MVP Step 5</p>
-        <h1>Round Flow and Resolve Engine</h1>
+        <p className="eyebrow">MVP Step 6</p>
+        <h1>Reconnect and Pause Recovery</h1>
         <p className="summary">
-          Complete the lobby flow, submit 3 cards, then watch the server resolve each pair
-          in order and either advance to the next round or finish the game.
+          If a player disconnects mid-game, the match pauses for 30 seconds. Reconnect with
+          the saved player token and the server restores the previous phase.
         </p>
 
         <dl className="status-grid">
@@ -346,6 +410,9 @@ export const App = () => {
           <button onClick={connect} disabled={connected} className="ghost">
             Reconnect
           </button>
+          <button onClick={handleReconnect} disabled={!connected} className="ghost">
+            Restore Session
+          </button>
         </div>
 
         {roomError ? (
@@ -354,6 +421,36 @@ export const App = () => {
             <p>{roomError.message}</p>
           </section>
         ) : null}
+
+        <section className="room-box">
+          <h2>Reconnect State</h2>
+          {gameState?.phase === "paused_reconnect" ? (
+            <dl className="detail-grid">
+              <div>
+                <dt>Paused Phase</dt>
+                <dd>{gameState.pausedState ?? "-"}</dd>
+              </div>
+              <div>
+                <dt>Disconnected Role</dt>
+                <dd>{gameState.disconnectedPlayerRole ?? "-"}</dd>
+              </div>
+              <div>
+                <dt>Reconnect Deadline</dt>
+                <dd>
+                  {gameState.reconnectDeadline
+                    ? new Date(gameState.reconnectDeadline).toLocaleTimeString()
+                    : "-"}
+                </dd>
+              </div>
+              <div>
+                <dt>Saved Session</dt>
+                <dd>{playerSession ? "available" : "missing"}</dd>
+              </div>
+            </dl>
+          ) : (
+            <p className="empty-state">Reconnect pause state appears here when a player drops.</p>
+          )}
+        </section>
 
         <section className="room-box">
           <h2>Current Session</h2>
@@ -646,20 +743,36 @@ export const App = () => {
         <section className="room-box">
           <h2>Result</h2>
           {gameState?.result ? (
-            <dl className="detail-grid">
-              <div>
-                <dt>Outcome</dt>
-                <dd>{gameState.result.outcome}</dd>
+            <div className="result-panel">
+              <p className="result-kicker">
+                {gameState.result.outcome === "draw"
+                  ? "Draw"
+                  : gameState.result.winnerRole === playerSession?.role
+                    ? "Victory"
+                    : "Defeat"}
+              </p>
+              <h3 className="result-title">
+                {gameState.result.outcome === "draw"
+                  ? "The match ended in a draw."
+                  : gameState.result.winnerRole === playerSession?.role
+                    ? "You won the duel."
+                    : "You lost the duel."}
+              </h3>
+              <p className="summary">{gameState.result.reason}</p>
+              <dl className="detail-grid">
+                <div>
+                  <dt>Outcome</dt>
+                  <dd>{gameState.result.outcome}</dd>
+                </div>
+                <div>
+                  <dt>Winner</dt>
+                  <dd>{gameState.result.winnerRole ?? "draw"}</dd>
+                </div>
+              </dl>
+              <div className="actions">
+                <button onClick={handleLeaveGame}>Leave Game</button>
               </div>
-              <div>
-                <dt>Winner</dt>
-                <dd>{gameState.result.winnerRole ?? "draw"}</dd>
-              </div>
-              <div>
-                <dt>Reason</dt>
-                <dd>{gameState.result.reason}</dd>
-              </div>
-            </dl>
+            </div>
           ) : (
             <p className="empty-state">The game result is shown here when a winner is decided.</p>
           )}
