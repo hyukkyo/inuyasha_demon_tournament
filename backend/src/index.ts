@@ -501,7 +501,7 @@ const runResolveSequence = async (room: RoomRecord, reason: string, resetSteps =
       return;
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await new Promise((resolve) => setTimeout(resolve, 2500));
 
     if (room.gameState?.phase === "paused_reconnect") {
       resolvingRooms.delete(room.id);

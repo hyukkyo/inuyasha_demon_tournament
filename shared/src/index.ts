@@ -1,8 +1,8 @@
 export const ROOM_ID_LENGTH = 6;
 export const ROOM_EXPIRATION_MINUTES = 10;
-export const CHARACTER_SELECT_TIMEOUT_SECONDS = 10;
-export const CARD_SELECT_TIMEOUT_SECONDS = 30;
-export const RECONNECT_TIMEOUT_SECONDS = 30;
+export const CHARACTER_SELECT_TIMEOUT_SECONDS = 100;
+export const CARD_SELECT_TIMEOUT_SECONDS = 300;
+export const RECONNECT_TIMEOUT_SECONDS = 300;
 export const MAX_ROUNDS = 100;
 export const BOARD_WIDTH = 4;
 export const BOARD_HEIGHT = 3;

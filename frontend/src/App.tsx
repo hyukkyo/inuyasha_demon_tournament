@@ -799,7 +799,7 @@ const ResolvingScreen = () => {
 
     const timeout = window.setTimeout(() => {
       advanceResolvePlayback();
-    }, currentEvent.type === "pair_reveal" || currentEvent.type === "turn_order" ? 700 : 900);
+    }, currentEvent.type === "pair_reveal" || currentEvent.type === "turn_order" ? 7000 : 9000);
 
     return () => {
       window.clearTimeout(timeout);
